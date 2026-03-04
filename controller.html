@@ -1,0 +1,186 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>RPS Mobile Joystick</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #111;
+      color: #fff;
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+    }
+    .card {
+      width: min(92vw, 480px);
+      background: #1d1d1d;
+      border: 1px solid #333;
+      border-radius: 16px;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+    .status { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+    .hint { color: #b7b7b7; font-size: 14px; line-height: 1.45; }
+    #pad {
+      width: min(72vw, 300px);
+      height: min(72vw, 300px);
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 30%, #393939, #202020);
+      border: 2px solid #4b4b4b;
+      position: relative;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #stick {
+      width: 92px;
+      height: 92px;
+      border-radius: 999px;
+      background: #61dafb;
+      border: 2px solid #9ff0ff;
+      position: absolute;
+      left: calc(50% - 46px);
+      top: calc(50% - 46px);
+      pointer-events: none;
+      transition: transform 0.05s linear;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="status" id="status">Connecting...</div>
+    <div class="hint" id="hint">Move the joystick to control your character.</div>
+  </div>
+  <div id="pad"><div id="stick"></div></div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const hintEl = document.getElementById('hint');
+    const pad = document.getElementById('pad');
+    const stick = document.getElementById('stick');
+
+    let token = localStorage.getItem('rps_mobile_token') || '';
+    let vec = { x: 0, y: 0 };
+    let activeTouch = null;
+    let sending = false;
+    let lastRttMs = null;
+
+    function setStick(x, y) {
+      const r = pad.clientWidth / 2 - 46;
+      stick.style.transform = `translate(${x * r}px, ${y * r}px)`;
+    }
+
+    async function apiPost(path, body) {
+      const res = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return res.json();
+    }
+
+    async function joinRoom() {
+      try {
+        const data = await apiPost('/api/join', { token });
+        if (!data.ok) {
+          statusEl.textContent = 'Room is full';
+          hintEl.textContent = 'Ask host to restart room or wait for a free slot.';
+          return;
+        }
+
+        token = data.token;
+        localStorage.setItem('rps_mobile_token', token);
+        statusEl.textContent = `Connected as P${data.player_id}`;
+        hintEl.textContent = 'Hold and drag joystick to move.';
+      } catch (_err) {
+        statusEl.textContent = 'Connection failed';
+        hintEl.textContent = 'Please refresh this page.';
+      }
+    }
+
+    function readPointer(e) {
+      if (e.changedTouches) {
+        for (const t of e.changedTouches) {
+          if (activeTouch === null || t.identifier === activeTouch) {
+            activeTouch = t.identifier;
+            return { x: t.clientX, y: t.clientY };
+          }
+        }
+      }
+      return { x: e.clientX, y: e.clientY };
+    }
+
+    function updateVector(e) {
+      const rect = pad.getBoundingClientRect();
+      const p = readPointer(e);
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+
+      let dx = (p.x - cx) / (rect.width / 2);
+      let dy = (p.y - cy) / (rect.height / 2);
+      const len = Math.hypot(dx, dy);
+      if (len > 1) {
+        dx /= len;
+        dy /= len;
+      }
+      vec = { x: dx, y: dy };
+      setStick(dx, dy);
+    }
+
+    function resetVector() {
+      activeTouch = null;
+      vec = { x: 0, y: 0 };
+      setStick(0, 0);
+    }
+
+    async function sendInput() {
+      if (!token || sending) return;
+      sending = true;
+      const t0 = performance.now();
+      try {
+        const payload = { token, x: vec.x, y: vec.y };
+        if (lastRttMs !== null) payload.rtt_ms = lastRttMs;
+        await apiPost('/api/input', payload);
+        lastRttMs = performance.now() - t0;
+      } catch (_err) {
+        // keep polling
+      } finally {
+        sending = false;
+      }
+    }
+
+    pad.addEventListener('touchstart', (e) => { e.preventDefault(); updateVector(e); }, { passive: false });
+    pad.addEventListener('touchmove', (e) => { e.preventDefault(); updateVector(e); }, { passive: false });
+    pad.addEventListener('touchend', (e) => { e.preventDefault(); resetVector(); }, { passive: false });
+
+    pad.addEventListener('mousedown', (e) => {
+      updateVector(e);
+      const onMove = (ev) => updateVector(ev);
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        resetVector();
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    });
+
+    setInterval(sendInput, 50);
+    joinRoom();
+  </script>
+</body>
+</html>
