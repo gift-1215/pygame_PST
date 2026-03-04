@@ -32,6 +32,7 @@ SERVER_PORT = 8765
 MAX_PLAYERS = 3
 COUNTDOWN_SECONDS = 3
 TEST_SECONDS = 10
+START_FULLSCREEN = False
 
 QR_MISSING_MSG = "QR package missing: run `pip3 install qrcode` and restart game."
 
@@ -89,6 +90,13 @@ def load_controller_html():
     if html_file.exists():
         return html_file.read_text(encoding="utf-8")
     return "<h1>Missing controller.html</h1>"
+
+
+def create_screen(fullscreen):
+    flags = pygame.SCALED
+    if fullscreen:
+        flags |= pygame.FULLSCREEN
+    return pygame.display.set_mode((WIDTH, HEIGHT), flags)
 
 
 class MobileHub:
@@ -557,6 +565,34 @@ def draw_network_hud(screen, font, connected_players, latency_ms):
         y += 22
 
 
+def draw_menu_network_info(screen, font, connected_players, latency_ms):
+    if not connected_players:
+        return
+
+    x = 60
+    y = HEIGHT - 128
+    title = font.render("Network:", True, (50, 50, 50))
+    screen.blit(title, (x, y))
+    y += 24
+
+    for player_id in connected_players:
+        ms = latency_ms.get(player_id, 9999.0)
+        ms = round(ms / 5.0) * 5.0
+        if ms < 90:
+            color = (40, 145, 60)
+            quality = "GOOD"
+        elif ms < 180:
+            color = (205, 150, 25)
+            quality = "OK"
+        else:
+            color = (200, 65, 65)
+            quality = "LAG"
+
+        line = f"{PLAYER_LABELS[player_id]} {int(ms)}ms {quality}"
+        screen.blit(font.render(line, True, color), (x + 8, y))
+        y += 22
+
+
 def update_and_draw_trails(screen, trail_surface, agents):
     trail_surface.fill((255, 255, 255, 226), special_flags=pygame.BLEND_RGBA_MULT)
     for agent in agents:
@@ -618,7 +654,18 @@ def draw_player_legend(screen, font, connected_players):
         y += 34
 
 
-def draw_menu(screen, bg_surface, title_font, font, small_font, button_font, join_url, qr_surface, connected_players):
+def draw_menu(
+    screen,
+    bg_surface,
+    title_font,
+    font,
+    small_font,
+    button_font,
+    join_url,
+    qr_surface,
+    connected_players,
+    latency_ms,
+):
     screen.blit(bg_surface, (0, 0))
 
     title = title_font.render("RPS Battle - 3P Mobile", True, (35, 35, 35))
@@ -641,6 +688,7 @@ def draw_menu(screen, bg_surface, title_font, font, small_font, button_font, joi
     else:
         connected_text = "Connected: none"
     screen.blit(font.render(connected_text, True, (30, 30, 30)), (60, HEIGHT - 170))
+    draw_menu_network_info(screen, small_font, connected_players, latency_ms)
     draw_player_legend(screen, small_font, connected_players)
 
     test_button = pygame.Rect(WIDTH // 2 - 140, HEIGHT - 184, 280, 58)
@@ -665,7 +713,8 @@ def main():
     pygame.font.init()
 
     try:
-        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        is_fullscreen = START_FULLSCREEN
+        screen = create_screen(is_fullscreen)
     except pygame.error as error:
         print(f"Failed to open game window: {error}")
         pygame.quit()
@@ -718,10 +767,22 @@ def main():
             for event in events:
                 if event.type == pygame.QUIT:
                     running = False
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_f:
+                    is_fullscreen = not is_fullscreen
+                    screen = create_screen(is_fullscreen)
 
             if state == "menu":
                 start_btn, test_btn = draw_menu(
-                    screen, bg_surface, title_font, font, small_font, button_font, join_url, qr_surface, connected_players
+                    screen,
+                    bg_surface,
+                    title_font,
+                    font,
+                    small_font,
+                    button_font,
+                    join_url,
+                    qr_surface,
+                    connected_players,
+                    display_latency_ms,
                 )
                 for event in events:
                     if event.type == pygame.MOUSEBUTTONDOWN and start_btn.collidepoint(mouse_pos):
