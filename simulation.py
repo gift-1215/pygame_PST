@@ -65,11 +65,6 @@ TEAM_COLORS = {
     "rock": (0, 114, 178),
     "paper": (230, 159, 0),
 }
-TEAM_EMOJIS = {
-    "scissors": "✂️",
-    "rock": "🪨",
-    "paper": "📄",
-}
 PLAYER_ASSIGNMENTS = {
     1: {"type": "scissors", "group": "scissors", "label": "S1"},
     2: {"type": "scissors", "group": "scissors", "label": "S2"},
@@ -895,16 +890,10 @@ def draw_menu(
             preview_panel = pygame.Rect(box.right - 126, qr_box_y + 62, 104, 186)
             pygame.draw.rect(screen, (247, 250, 255), preview_panel, border_radius=10)
             pygame.draw.rect(screen, (220, 227, 239), preview_panel, 1, border_radius=10)
-            emoji = TEAM_EMOJIS.get(group, "")
-            emoji_text = font.render(emoji, True, TEAM_COLORS[group])
-            screen.blit(
-                emoji_text,
-                (preview_panel.centerx - emoji_text.get_width() // 2, preview_panel.y + 8),
-            )
             preview_surface = team_preview_surfaces.get(group)
             if preview_surface is not None:
                 preview_x = preview_panel.centerx - preview_surface.get_width() // 2
-                preview_y = preview_panel.y + 54
+                preview_y = preview_panel.y + 36
                 screen.blit(preview_surface, (preview_x, preview_y))
             look_text = tiny_font.render("In-game look", True, (88, 96, 112))
             screen.blit(
