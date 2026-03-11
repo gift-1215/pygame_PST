@@ -5,18 +5,20 @@ import pygame
 from agents import create_positioning_agents, create_test_agents
 from game_settings import (
     COUNTDOWN_SECONDS,
+    EASY_NPC_PER_TYPE,
     FPS,
     MAX_PLAYERS,
+    NPC_PER_TYPE,
     QR_MISSING_MSG,
     SERVER_HOST,
     SERVER_PORT,
     START_FULLSCREEN,
     TEAM_TYPES,
-    TEST_SECONDS,
     WIDTH,
     HEIGHT,
 )
 from networking import MobileHub, get_local_ip, load_controller_html, start_server
+from rules_page import draw_rules_page
 from visuals import (
     build_background_surface,
     build_qr_surface,
@@ -26,6 +28,8 @@ from visuals import (
     draw_network_hud,
     draw_pause_button,
     draw_player_controlled_hud,
+    draw_soft_text_block,
+    draw_soft_text_panel,
     render_arena,
 )
 
@@ -82,12 +86,16 @@ def main():
     bg_surface = build_background_surface()
     trail_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
     agents = []
-    state = "menu"
+    state = "rules"
     countdown_start = 0.0
     test_start = 0.0
     pause_return_state = "playing"
     display_latency_ms = {}
     next_latency_update = 0.0
+    selected_difficulty = "hard"
+
+    def npc_per_type_for(difficulty):
+        return EASY_NPC_PER_TYPE if difficulty == "easy" else NPC_PER_TYPE
 
     try:
         running = True
@@ -107,8 +115,23 @@ def main():
                     is_fullscreen = not is_fullscreen
                     screen = create_screen(is_fullscreen)
 
-            if state == "menu":
-                start_btn, test_btn = draw_menu(
+            if state == "rules":
+                go_menu_btn = draw_rules_page(
+                    screen,
+                    bg_surface,
+                    title_font,
+                    font,
+                    small_font,
+                    button_font,
+                )
+                for event in events:
+                    if event.type == pygame.MOUSEBUTTONDOWN and go_menu_btn.collidepoint(mouse_pos):
+                        state = "menu"
+                    elif event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                        state = "menu"
+
+            elif state == "menu":
+                start_btn, test_btn, rules_btn, easy_btn, hard_btn = draw_menu(
                     screen,
                     bg_surface,
                     title_font,
@@ -120,10 +143,14 @@ def main():
                     team_preview_surfaces,
                     connected_players,
                     display_latency_ms,
+                    selected_difficulty,
                 )
                 for event in events:
                     if event.type == pygame.MOUSEBUTTONDOWN and start_btn.collidepoint(mouse_pos):
-                        agents = create_positioning_agents(connected_players)
+                        agents = create_positioning_agents(
+                            connected_players,
+                            npc_per_type=npc_per_type_for(selected_difficulty),
+                        )
                         trail_surface.fill((0, 0, 0, 0))
                         state = "positioning"
                     elif event.type == pygame.MOUSEBUTTONDOWN and test_btn.collidepoint(mouse_pos):
@@ -132,7 +159,10 @@ def main():
                         test_start = time.monotonic()
                         state = "test"
                     elif event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
-                        agents = create_positioning_agents(connected_players)
+                        agents = create_positioning_agents(
+                            connected_players,
+                            npc_per_type=npc_per_type_for(selected_difficulty),
+                        )
                         trail_surface.fill((0, 0, 0, 0))
                         state = "positioning"
                     elif event.type == pygame.KEYDOWN and event.key == pygame.K_t:
@@ -140,6 +170,14 @@ def main():
                         trail_surface.fill((0, 0, 0, 0))
                         test_start = time.monotonic()
                         state = "test"
+                    elif event.type == pygame.MOUSEBUTTONDOWN and rules_btn.collidepoint(mouse_pos):
+                        state = "rules"
+                    elif event.type == pygame.KEYDOWN and event.key == pygame.K_F1:
+                        state = "rules"
+                    elif event.type == pygame.MOUSEBUTTONDOWN and easy_btn.collidepoint(mouse_pos):
+                        selected_difficulty = "easy"
+                    elif event.type == pygame.MOUSEBUTTONDOWN and hard_btn.collidepoint(mouse_pos):
+                        selected_difficulty = "hard"
 
             elif state == "test":
                 for agent in agents:
@@ -157,15 +195,15 @@ def main():
                 draw_network_hud(screen, small_font, connected_players, display_latency_ms, start_y=12)
                 pause_btn = draw_pause_button(screen, small_font, paused=False)
 
-                elapsed = time.monotonic() - test_start
-                remain = max(0.0, TEST_SECONDS - elapsed)
-                title = font.render(f"Control Test: {remain:0.1f}s", True, (45, 45, 45))
-                screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 14))
-                hint = small_font.render("Press ENTER for match setup, ESC to menu", True, (45, 45, 45))
-                screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, 42))
-
-                if elapsed >= TEST_SECONDS:
-                    state = "menu"
+                draw_soft_text_panel(
+                    screen,
+                    [
+                        (font, "Control Test", (45, 45, 45)),
+                        (small_font, "Press ENTER for match setup, ESC to menu", (45, 45, 45)),
+                    ],
+                    WIDTH // 2,
+                    12,
+                )
 
                 for event in events:
                     if event.type == pygame.MOUSEBUTTONDOWN and pause_btn.collidepoint(mouse_pos):
@@ -175,7 +213,10 @@ def main():
                         pause_return_state = "test"
                         state = "paused"
                     elif event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
-                        agents = create_positioning_agents(connected_players)
+                        agents = create_positioning_agents(
+                            connected_players,
+                            npc_per_type=npc_per_type_for(selected_difficulty),
+                        )
                         trail_surface.fill((0, 0, 0, 0))
                         state = "positioning"
                     elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
@@ -201,12 +242,16 @@ def main():
                 hud_next_y = draw_player_controlled_hud(screen, small_font, agents, y=12)
                 draw_network_hud(screen, small_font, connected_players, display_latency_ms, start_y=hud_next_y)
 
-                title = font.render("Match Setup: Find your character", True, (45, 45, 45))
-                screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 14))
-                hint = small_font.render("NPC are paused. Move slightly to confirm your position.", True, (48, 48, 48))
-                screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, 46))
-                hint2 = small_font.render("Press S when everyone is ready (ESC to menu)", True, (40, 108, 63))
-                screen.blit(hint2, (WIDTH // 2 - hint2.get_width() // 2, 76))
+                draw_soft_text_panel(
+                    screen,
+                    [
+                        (font, "Match Setup: Find your character", (45, 45, 45)),
+                        (small_font, "NPC are paused. Move slightly to confirm your position.", (48, 48, 48)),
+                        (small_font, "Press S when everyone is ready (ESC to menu)", (40, 108, 63)),
+                    ],
+                    WIDTH // 2,
+                    12,
+                )
 
                 for event in events:
                     if event.type == pygame.KEYDOWN and event.key == pygame.K_s:
@@ -234,8 +279,15 @@ def main():
                 num = title_font.render(str(remain), True, (35, 35, 35))
                 screen.blit(num, (WIDTH // 2 - num.get_width() // 2, HEIGHT // 2 - num.get_height() // 2))
 
-                hint = font.render("Get ready! Check your position.", True, (55, 55, 55))
-                screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT // 2 + 70))
+                draw_soft_text_block(
+                    screen,
+                    font,
+                    "Get ready! Check your position.",
+                    WIDTH // 2,
+                    HEIGHT // 2 + 70,
+                    text_color=(55, 55, 55),
+                    align="center",
+                )
 
                 if elapsed >= COUNTDOWN_SECONDS:
                     state = "playing"
@@ -330,7 +382,10 @@ def main():
 
                 for event in events:
                     if event.type == pygame.KEYDOWN and event.key == pygame.K_r:
-                        agents = create_positioning_agents(connected_players)
+                        agents = create_positioning_agents(
+                            connected_players,
+                            npc_per_type=npc_per_type_for(selected_difficulty),
+                        )
                         trail_surface.fill((0, 0, 0, 0))
                         state = "positioning"
                     elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:

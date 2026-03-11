@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pygame
 
 from game_settings import (
@@ -22,6 +24,9 @@ try:
     import qrcode
 except ImportError:
     qrcode = None
+
+
+ICON_ASSET_DIR = Path(__file__).with_name("assets") / "icons"
 
 
 def build_qr_surface(link, box_size=6, border=2):
@@ -87,16 +92,68 @@ def make_agent_sprite(kind):
     return surf
 
 
+def load_agent_sprite_asset(kind, size):
+    path = ICON_ASSET_DIR / f"{kind}.png"
+    if not path.exists():
+        return None
+    try:
+        source = pygame.image.load(str(path)).convert_alpha()
+    except pygame.error:
+        return None
+    return pygame.transform.smoothscale(source, (size, size))
+
+
+def make_team_preview_icon(kind, size=96):
+    center = size // 2
+    surf = pygame.Surface((size, size), pygame.SRCALPHA)
+
+    pygame.draw.circle(surf, TYPE_COLORS[kind], (center, center), size // 2 - 6)
+    pygame.draw.circle(surf, (42, 48, 58), (center, center), size // 2 - 6, 4)
+
+    if kind == "rock":
+        points = [
+            (center - 23, center + 12),
+            (center - 18, center - 14),
+            (center - 5, center - 24),
+            (center + 13, center - 20),
+            (center + 24, center - 6),
+            (center + 21, center + 16),
+            (center + 4, center + 24),
+            (center - 15, center + 20),
+        ]
+        pygame.draw.polygon(surf, (86, 96, 112), points)
+        pygame.draw.polygon(surf, (25, 25, 25), points, 4)
+    elif kind == "paper":
+        rect = pygame.Rect(center - 20, center - 26, 40, 52)
+        pygame.draw.rect(surf, (255, 255, 255), rect, border_radius=5)
+        pygame.draw.rect(surf, (30, 30, 30), rect, 4, border_radius=5)
+        fold = [(center + 6, center - 26), (center + 20, center - 26), (center + 20, center - 12)]
+        pygame.draw.polygon(surf, (232, 232, 232), fold)
+        pygame.draw.line(surf, (40, 40, 40), (center + 6, center - 26), (center + 20, center - 12), 3)
+    else:
+        blade = (242, 242, 242)
+        outline = (34, 34, 34)
+        pygame.draw.circle(surf, blade, (center - 12, center + 14), 10, 4)
+        pygame.draw.circle(surf, blade, (center + 12, center + 14), 10, 4)
+        pygame.draw.line(surf, blade, (center - 5, center + 8), (center - 25, center - 18), 7)
+        pygame.draw.line(surf, blade, (center + 5, center + 8), (center + 25, center - 18), 7)
+        pygame.draw.line(surf, outline, (center - 5, center + 8), (center - 25, center - 18), 2)
+        pygame.draw.line(surf, outline, (center + 5, center + 8), (center + 25, center - 18), 2)
+
+    return surf
+
+
 def build_sprites():
-    return {kind: make_agent_sprite(kind) for kind in RULES}
+    sprite_size = AGENT_RADIUS * 2 + 14
+    sprites = {}
+    for kind in RULES:
+        asset_sprite = load_agent_sprite_asset(kind, sprite_size)
+        sprites[kind] = asset_sprite if asset_sprite is not None else make_agent_sprite(kind)
+    return sprites
 
 
-def build_team_preview_surfaces(sprites):
-    previews = {}
-    for group in TEAM_TYPES:
-        base = sprites[group]
-        previews[group] = pygame.transform.smoothscale(base, (96, 96))
-    return previews
+def build_team_preview_surfaces(_sprites):
+    return {group: make_team_preview_icon(group, 96) for group in TEAM_TYPES}
 
 
 def build_background_surface():
@@ -126,13 +183,68 @@ def draw_pause_button(screen, font, paused):
     return rect
 
 
+def draw_soft_text_block(
+    screen,
+    font,
+    text,
+    x,
+    y,
+    text_color=(40, 40, 40),
+    align="left",
+    pad_x=9,
+    pad_y=4,
+):
+    text_surface = font.render(text, True, text_color)
+    tx = x if align == "left" else x - text_surface.get_width() // 2
+    panel = pygame.Rect(
+        tx - pad_x,
+        y - pad_y,
+        text_surface.get_width() + pad_x * 2,
+        text_surface.get_height() + pad_y * 2,
+    )
+    panel_surf = pygame.Surface((panel.width, panel.height), pygame.SRCALPHA)
+    pygame.draw.rect(panel_surf, (252, 254, 255, 145), panel_surf.get_rect(), border_radius=8)
+    pygame.draw.rect(panel_surf, (188, 198, 215, 130), panel_surf.get_rect(), 1, border_radius=8)
+    screen.blit(panel_surf, (panel.x, panel.y))
+    screen.blit(text_surface, (tx, y))
+    return panel
+
+
+def draw_soft_text_panel(screen, lines, center_x, top_y, pad_x=14, pad_y=10, line_gap=6):
+    rendered = [font.render(text, True, color) for font, text, color in lines]
+    content_w = max((surface.get_width() for surface in rendered), default=0)
+
+    content_h = 0
+    for idx, surface in enumerate(rendered):
+        content_h += surface.get_height()
+        if idx < len(rendered) - 1:
+            content_h += line_gap
+
+    panel = pygame.Rect(
+        center_x - (content_w // 2) - pad_x,
+        top_y - pad_y,
+        content_w + pad_x * 2,
+        content_h + pad_y * 2,
+    )
+    panel_surf = pygame.Surface((panel.width, panel.height), pygame.SRCALPHA)
+    pygame.draw.rect(panel_surf, (252, 254, 255, 145), panel_surf.get_rect(), border_radius=10)
+    pygame.draw.rect(panel_surf, (188, 198, 215, 130), panel_surf.get_rect(), 1, border_radius=10)
+    screen.blit(panel_surf, (panel.x, panel.y))
+
+    y = panel.y + pad_y
+    for surface in rendered:
+        x = center_x - surface.get_width() // 2
+        screen.blit(surface, (x, y))
+        y += surface.get_height() + line_gap
+
+    return panel
+
+
 def draw_player_controlled_hud(screen, font, agents, y=12):
     controlled = sorted(a.slot_id for a in agents if a.slot_id is not None and a.is_mobile)
     ctrl_text = ", ".join(PLAYER_LABELS[p] for p in controlled) if controlled else "none"
-    color = (40, 40, 40)
-    text = font.render("Player-controlled: " + ctrl_text, True, color)
-    screen.blit(text, (15, y))
-    return y + text.get_height() + 8
+    panel = draw_soft_text_block(screen, font, "Player-controlled: " + ctrl_text, 15, y, text_color=(40, 40, 40))
+    return panel.bottom + 6
 
 
 def draw_network_hud(screen, font, connected_players, latency_ms, start_y=44):
@@ -153,10 +265,16 @@ def draw_network_hud(screen, font, connected_players, latency_ms, start_y=44):
         else:
             quality = "LAG"
             color = (200, 65, 65)
-        line = f"{PLAYER_LABELS[player_id]}: {int(ms)}ms {quality}"
-        text = font.render(line, True, color)
-        screen.blit(text, (x, y))
-        y += 22
+
+        panel = draw_soft_text_block(
+            screen,
+            font,
+            f"{PLAYER_LABELS[player_id]}: {int(ms)}ms {quality}",
+            x,
+            y,
+            text_color=color,
+        )
+        y = panel.bottom + 4
 
 
 def draw_menu_network_info(screen, font, connected_players, latency_ms):
@@ -219,19 +337,27 @@ def render_arena(screen, bg_surface, trail_surface, agents, sprites, tag_font, c
 
 def draw_player_tags(screen, agents, font, connected_players):
     connected_set = set(connected_players)
-    hide_non_connected = len(connected_set) == 1
+    if not connected_set:
+        return
 
     for agent in agents:
         if agent.slot_id is None:
             continue
-        if hide_non_connected and agent.slot_id not in connected_set:
+        if agent.slot_id not in connected_set:
             continue
 
         kind = PLAYER_ASSIGNMENTS[agent.slot_id]["type"].upper()
-        label = font.render(f"{PLAYER_LABELS[agent.slot_id]} {kind}", True, PLAYER_HIGHLIGHTS[agent.slot_id])
-        x = int(agent.pos.x - label.get_width() / 2)
-        y = max(8, int(agent.pos.y) - 28)
-        screen.blit(label, (x, y))
+        draw_soft_text_block(
+            screen,
+            font,
+            f"{PLAYER_LABELS[agent.slot_id]} {kind}",
+            int(agent.pos.x),
+            max(8, int(agent.pos.y) - 28),
+            text_color=PLAYER_HIGHLIGHTS[agent.slot_id],
+            align="center",
+            pad_x=7,
+            pad_y=3,
+        )
 
 
 def draw_player_legend(screen, font, small_font, connected_players):
@@ -272,6 +398,7 @@ def draw_menu(
     team_preview_surfaces,
     connected_players,
     latency_ms,
+    selected_difficulty,
 ):
     screen.blit(bg_surface, (0, 0))
 
@@ -339,10 +466,35 @@ def draw_menu(
     draw_player_legend(screen, tiny_font, small_font, connected_players)
 
     test_button = pygame.Rect(WIDTH // 2 - 180, HEIGHT - 180, 360, 56)
+    diff_btn_y = test_button.y - 40
+    diff_label = tiny_font.render("Difficulty", True, (79, 89, 106))
+    screen.blit(diff_label, (test_button.centerx - diff_label.get_width() // 2, diff_btn_y - 22))
+
+    easy_btn = pygame.Rect(test_button.centerx - 108, diff_btn_y, 98, 34)
+    hard_btn = pygame.Rect(test_button.centerx + 10, diff_btn_y, 98, 34)
+    easy_active = selected_difficulty == "easy"
+    hard_active = selected_difficulty == "hard"
+
+    pygame.draw.rect(screen, (214, 241, 224) if easy_active else (244, 247, 252), easy_btn, border_radius=8)
+    pygame.draw.rect(screen, (63, 145, 96) if easy_active else (142, 153, 176), easy_btn, 2, border_radius=8)
+    easy_text = tiny_font.render("EASY", True, (45, 120, 74) if easy_active else (82, 93, 112))
+    screen.blit(easy_text, (easy_btn.centerx - easy_text.get_width() // 2, easy_btn.centery - easy_text.get_height() // 2))
+
+    pygame.draw.rect(screen, (227, 235, 255) if hard_active else (244, 247, 252), hard_btn, border_radius=8)
+    pygame.draw.rect(screen, (70, 108, 194) if hard_active else (142, 153, 176), hard_btn, 2, border_radius=8)
+    hard_text = tiny_font.render("HARD", True, (50, 83, 164) if hard_active else (82, 93, 112))
+    screen.blit(hard_text, (hard_btn.centerx - hard_text.get_width() // 2, hard_btn.centery - hard_text.get_height() // 2))
+
     pygame.draw.rect(screen, (237, 242, 251), test_button, border_radius=12)
     pygame.draw.rect(screen, (88, 120, 176), test_button, 2, border_radius=12)
     test_text = button_font.render("TEST CONTROLS", True, (62, 92, 148))
     screen.blit(test_text, (test_button.centerx - test_text.get_width() // 2, test_button.centery - test_text.get_height() // 2))
+
+    rules_button = pygame.Rect(WIDTH - 210, 78, 160, 44)
+    pygame.draw.rect(screen, (246, 248, 252), rules_button, border_radius=10)
+    pygame.draw.rect(screen, (120, 136, 166), rules_button, 2, border_radius=10)
+    rules_text = tiny_font.render("RULES", True, (77, 90, 116))
+    screen.blit(rules_text, (rules_button.centerx - rules_text.get_width() // 2, rules_button.centery - rules_text.get_height() // 2))
 
     button = pygame.Rect(WIDTH // 2 - 180, HEIGHT - 112, 360, 68)
     pygame.draw.rect(screen, (38, 178, 96), button, border_radius=12)
@@ -355,4 +507,4 @@ def draw_menu(
     fs_hint = tiny_font.render("F: Toggle Fullscreen", True, (98, 104, 118))
     screen.blit(fs_hint, (WIDTH - fs_hint.get_width() - 22, HEIGHT - 24))
 
-    return button, test_button
+    return button, test_button, rules_button, easy_btn, hard_btn

@@ -1,7 +1,7 @@
 import time
 import unittest
 
-from game_settings import CONNECTION_STALE_SECONDS, INPUT_STALE_SECONDS, MAX_PLAYERS
+from game_settings import CONNECTION_STALE_SECONDS, INPUT_STALE_SECONDS, MAX_LATENCY_MS, MAX_PLAYERS
 from networking import MobileHub
 
 
@@ -57,6 +57,32 @@ class MobileHubTest(unittest.TestCase):
         inputs, connected, _latency = self.hub.snapshot()
         self.assertNotIn(player_id, connected)
         self.assertEqual(inputs[player_id], (0.0, 0.0))
+
+    def test_high_rtt_disconnects_player_immediately(self):
+        ok, player_id, token, _reason = self.hub.join(requested_group="rock")
+        self.assertTrue(ok)
+
+        accepted = self.hub.set_input(token, 0.2, 0.1, rtt_ms=MAX_LATENCY_MS + 1)
+        self.assertFalse(accepted)
+        self.assertNotIn(token, self.hub.token_to_player)
+        self.assertNotIn(player_id, self.hub.player_to_token)
+
+        _inputs, connected, _latency = self.hub.snapshot()
+        self.assertNotIn(player_id, connected)
+
+    def test_snapshot_disconnects_when_total_latency_exceeds_threshold(self):
+        ok, player_id, token, _reason = self.hub.join(requested_group="scissors")
+        self.assertTrue(ok)
+        self.assertTrue(self.hub.set_input(token, 0.1, 0.2, rtt_ms=20))
+
+        with self.hub.lock:
+            self.hub.last_seen[token] = time.monotonic() - ((MAX_LATENCY_MS + 50) / 1000.0)
+
+        _inputs, connected, latency = self.hub.snapshot()
+        self.assertNotIn(player_id, connected)
+        self.assertNotIn(player_id, latency)
+        self.assertNotIn(token, self.hub.token_to_player)
+        self.assertNotIn(player_id, self.hub.player_to_token)
 
 
 if __name__ == "__main__":

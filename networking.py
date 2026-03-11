@@ -11,6 +11,7 @@ from game_settings import (
     CONNECTION_STALE_SECONDS,
     INPUT_STALE_SECONDS,
     MAX_PLAYERS,
+    MAX_LATENCY_MS,
     PLAYER_ASSIGNMENTS,
     TEAM_TYPES,
     clamp,
@@ -65,11 +66,14 @@ class MobileHub:
                 stale_players.append((player_id, token))
 
         for player_id, token in stale_players:
-            self.player_to_token.pop(player_id, None)
-            self.token_to_player.pop(token, None)
-            self.last_seen.pop(token, None)
-            self.inputs[player_id] = (0.0, 0.0)
-            self.last_rtt_ms[player_id] = None
+            self._disconnect_player(player_id, token)
+
+    def _disconnect_player(self, player_id, token):
+        self.player_to_token.pop(player_id, None)
+        self.token_to_player.pop(token, None)
+        self.last_seen.pop(token, None)
+        self.inputs[player_id] = (0.0, 0.0)
+        self.last_rtt_ms[player_id] = None
 
     def join(self, existing_token=None, requested_group=None):
         with self.lock:
@@ -138,8 +142,12 @@ class MobileHub:
                     measured = float(rtt_ms)
                 except (TypeError, ValueError):
                     measured = None
-                if measured is not None and 0 <= measured <= 5000:
-                    self.last_rtt_ms[player_id] = measured
+                if measured is not None:
+                    if measured > MAX_LATENCY_MS:
+                        self._disconnect_player(player_id, token)
+                        return False
+                    if measured >= 0:
+                        self.last_rtt_ms[player_id] = measured
             self.last_seen[token] = time.monotonic()
             return True
 
@@ -150,6 +158,7 @@ class MobileHub:
             connected = sorted(self.player_to_token.keys())
             inputs = dict(self.inputs)
             latency = {}
+            disconnected = []
             for player_id in connected:
                 token = self.player_to_token.get(player_id)
                 if not token:
@@ -157,9 +166,19 @@ class MobileHub:
                 age_sec = max(0.0, now - self.last_seen.get(token, now))
                 age_ms = age_sec * 1000.0
                 base_ms = self.last_rtt_ms.get(player_id) or 0.0
-                latency[player_id] = age_ms + base_ms
+                total_latency = age_ms + base_ms
+                if total_latency > MAX_LATENCY_MS:
+                    disconnected.append((player_id, token))
+                    continue
+                latency[player_id] = total_latency
                 if age_sec > INPUT_STALE_SECONDS:
                     inputs[player_id] = (0.0, 0.0)
+
+            for player_id, token in disconnected:
+                self._disconnect_player(player_id, token)
+                inputs[player_id] = (0.0, 0.0)
+
+            connected = sorted(self.player_to_token.keys())
             return inputs, connected, latency
 
 

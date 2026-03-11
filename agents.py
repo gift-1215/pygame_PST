@@ -191,7 +191,7 @@ class Agent:
                 self.kind = PREDATOR_RULES[self.kind]
 
     def draw(self, screen, sprites):
-        if self.slot_id is not None:
+        if self.slot_id is not None and self.is_mobile:
             ring = PLAYER_HIGHLIGHTS[self.slot_id]
             pygame.draw.circle(
                 screen,
@@ -210,14 +210,14 @@ class Agent:
         screen.blit(rotated, rect)
 
 
-def create_agents(connected_players):
+def create_agents(connected_players, npc_per_type=NPC_PER_TYPE):
     connected_set = set(connected_players)
     agents = []
     occupied = []
     player_spawns = _build_player_spawns()
 
     for kind in ("rock", "paper", "scissors"):
-        for _ in range(NPC_PER_TYPE):
+        for _ in range(npc_per_type):
             sx, sy = _sample_spawn(occupied, NPC_SPAWN_MIN_DIST)
             occupied.append((sx, sy))
             agents.append(
@@ -237,8 +237,8 @@ def create_agents(connected_players):
     return agents
 
 
-def create_positioning_agents(connected_players):
-    agents = create_agents(connected_players)
+def create_positioning_agents(connected_players, npc_per_type=NPC_PER_TYPE):
+    agents = create_agents(connected_players, npc_per_type=npc_per_type)
     for agent in agents:
         agent.vel = pygame.Vector2(0, 0)
         agent.acc = pygame.Vector2(0, 0)
