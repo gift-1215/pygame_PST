@@ -1,12 +1,13 @@
 import time
 import unittest
 
-import simulation
+from game_settings import CONNECTION_STALE_SECONDS, INPUT_STALE_SECONDS, MAX_PLAYERS
+from networking import MobileHub
 
 
 class MobileHubTest(unittest.TestCase):
     def setUp(self):
-        self.hub = simulation.MobileHub(simulation.MAX_PLAYERS)
+        self.hub = MobileHub(MAX_PLAYERS)
 
     def test_stale_input_is_zeroed_before_disconnect(self):
         ok, player_id, token, _reason = self.hub.join(requested_group="paper")
@@ -14,7 +15,7 @@ class MobileHubTest(unittest.TestCase):
         self.assertTrue(self.hub.set_input(token, 1.0, -1.0, rtt_ms=32))
 
         with self.hub.lock:
-            self.hub.last_seen[token] = time.monotonic() - (simulation.INPUT_STALE_SECONDS + 0.05)
+            self.hub.last_seen[token] = time.monotonic() - (INPUT_STALE_SECONDS + 0.05)
 
         inputs, connected, _latency = self.hub.snapshot()
         self.assertIn(player_id, connected)
@@ -51,7 +52,7 @@ class MobileHubTest(unittest.TestCase):
         self.assertTrue(self.hub.set_input(token, 0.4, 0.5))
 
         with self.hub.lock:
-            self.hub.last_seen[token] = time.monotonic() - (simulation.CONNECTION_STALE_SECONDS + 0.2)
+            self.hub.last_seen[token] = time.monotonic() - (CONNECTION_STALE_SECONDS + 0.2)
 
         inputs, connected, _latency = self.hub.snapshot()
         self.assertNotIn(player_id, connected)

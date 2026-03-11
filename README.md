@@ -6,7 +6,7 @@ Local multiplayer Rock-Paper-Scissors battle using `pygame` + phone joystick ove
 
 ```bash
 pip3 install -r requirements.txt
-python3 simulation.py
+python3 main.py
 ```
 
 ## Play
@@ -26,6 +26,11 @@ python3 simulation.py
 
 ## Files
 
-- `simulation.py`: game loop + local HTTP controller server
+- `main.py`: primary entrypoint
+- `game_app.py`: game state machine and main loop
+- `game_settings.py`: configuration and shared constants
+- `agents.py`: agent behavior and spawning
+- `visuals.py`: rendering and menu/HUD drawing
+- `networking.py`: mobile control server and connection hub
 - `controller.html`: mobile joystick page
 - `requirements.txt`: dependencies
