@@ -17,7 +17,8 @@ python3 simulation.py
 
 ## Controls
 
-- `ENTER`: start game from menu
+- `ENTER`: open match setup from menu / test
+- `S`: start 3-second countdown from match setup
 - `T`: open 10-second control test area
 - `P`: pause / resume during test or game
 - `R`: replay from game-over

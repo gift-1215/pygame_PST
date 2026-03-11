@@ -35,6 +35,26 @@
     }
     .status { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
     .hint { color: #b7b7b7; font-size: 14px; line-height: 1.45; }
+    .goal { color: #ffe082; font-size: 14px; line-height: 1.45; margin-top: 6px; }
+    .actions {
+      margin-top: 10px;
+      display: flex;
+      justify-content: flex-start;
+    }
+    .btn {
+      border: 1px solid #4c4c4c;
+      background: #2a2a2a;
+      color: #f1f1f1;
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .btn:active {
+      transform: translateY(1px);
+    }
     #pad {
       width: min(72vw, 300px);
       height: min(72vw, 300px);
@@ -64,19 +84,27 @@
   <div class="card">
     <div class="status" id="status">Connecting...</div>
     <div class="hint" id="hint">Move the joystick to control your character.</div>
+    <div class="goal" id="goal"></div>
+    <div class="actions">
+      <button class="btn" id="rejoinBtn" type="button">Rejoin Team</button>
+    </div>
   </div>
   <div id="pad"><div id="stick"></div></div>
 
   <script>
     const statusEl = document.getElementById('status');
     const hintEl = document.getElementById('hint');
+    const goalEl = document.getElementById('goal');
+    const rejoinBtn = document.getElementById('rejoinBtn');
     const pad = document.getElementById('pad');
     const stick = document.getElementById('stick');
 
     let token = localStorage.getItem('rps_mobile_token') || '';
+    const requestedGroup = (new URLSearchParams(window.location.search).get('group') || '').toLowerCase();
     let vec = { x: 0, y: 0 };
     let activeTouch = null;
     let sending = false;
+    let joining = false;
     let lastRttMs = null;
 
     function setStick(x, y) {
@@ -93,22 +121,53 @@
       return res.json();
     }
 
+    function clearSession() {
+      token = '';
+      localStorage.removeItem('rps_mobile_token');
+      localStorage.removeItem('rps_mobile_group');
+      lastRttMs = null;
+    }
+
     async function joinRoom() {
+      if (joining) return;
+      joining = true;
       try {
-        const data = await apiPost('/api/join', { token });
+        const payload = {};
+        if (token) payload.token = token;
+        if (requestedGroup) payload.group = requestedGroup;
+        const data = await apiPost('/api/join', payload);
         if (!data.ok) {
-          statusEl.textContent = 'Room is full';
-          hintEl.textContent = 'Ask host to restart room or wait for a free slot.';
+          if (data.reason === 'group_full') {
+            statusEl.textContent = 'Team is full';
+            hintEl.textContent = 'This team already has 2 players. Scan another team QR code.';
+          } else {
+            statusEl.textContent = 'Room is full';
+            hintEl.textContent = 'Ask host to restart room or wait for a free slot.';
+          }
+          goalEl.textContent = '';
           return;
         }
 
         token = data.token;
         localStorage.setItem('rps_mobile_token', token);
-        statusEl.textContent = `Connected as P${data.player_id}`;
-        hintEl.textContent = 'Hold and drag joystick to move.';
+        if (data.assigned_group) {
+          localStorage.setItem('rps_mobile_group', data.assigned_group);
+        }
+        const assigned = (data.assigned_type || '').toUpperCase();
+        const assignedLabel = data.assigned_label || `P${data.player_id}`;
+        if (data.reason === 'switched_group') {
+          statusEl.textContent = `Switched to ${assignedLabel}`;
+        } else {
+          statusEl.textContent = `Connected as ${assignedLabel}`;
+        }
+        hintEl.textContent = assigned ? `You control ${assigned}.` : 'Hold and drag joystick to move.';
+        goalEl.textContent = data.goal_text || '';
       } catch (_err) {
         statusEl.textContent = 'Connection failed';
         hintEl.textContent = 'Please refresh this page.';
+        goalEl.textContent = '';
+      } finally {
+        joining = false;
       }
     }
 
@@ -154,7 +213,15 @@
       try {
         const payload = { token, x: vec.x, y: vec.y };
         if (lastRttMs !== null) payload.rtt_ms = lastRttMs;
-        await apiPost('/api/input', payload);
+        const data = await apiPost('/api/input', payload);
+        if (!data.ok && data.error === 'invalid_token') {
+          clearSession();
+          statusEl.textContent = 'Session expired';
+          hintEl.textContent = 'Reconnecting...';
+          goalEl.textContent = '';
+          await joinRoom();
+          return;
+        }
         lastRttMs = performance.now() - t0;
       } catch (_err) {
         // keep polling
@@ -162,6 +229,13 @@
         sending = false;
       }
     }
+
+    rejoinBtn.addEventListener('click', async () => {
+      statusEl.textContent = 'Reconnecting...';
+      hintEl.textContent = 'Reconnecting your current slot.';
+      goalEl.textContent = '';
+      await joinRoom();
+    });
 
     pad.addEventListener('touchstart', (e) => { e.preventDefault(); updateVector(e); }, { passive: false });
     pad.addEventListener('touchmove', (e) => { e.preventDefault(); updateVector(e); }, { passive: false });
