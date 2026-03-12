@@ -84,6 +84,20 @@ class MobileHubTest(unittest.TestCase):
         self.assertNotIn(token, self.hub.token_to_player)
         self.assertNotIn(player_id, self.hub.player_to_token)
 
+    def test_release_player_disconnects_and_frees_slot(self):
+        ok, player_id, token, _reason = self.hub.join(requested_group="paper")
+        self.assertTrue(ok)
+        self.assertIn(player_id, self.hub.player_to_token)
+
+        released = self.hub.release_player(player_id)
+        self.assertTrue(released)
+        self.assertNotIn(player_id, self.hub.player_to_token)
+        self.assertNotIn(token, self.hub.token_to_player)
+
+        ok2, new_player_id, _token2, _reason2 = self.hub.join(requested_group="paper")
+        self.assertTrue(ok2)
+        self.assertEqual(new_player_id, player_id)
+
 
 if __name__ == "__main__":
     unittest.main()

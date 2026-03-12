@@ -144,7 +144,7 @@ def make_team_preview_icon(kind, size=96):
 
 
 def build_sprites():
-    sprite_size = AGENT_RADIUS * 2 + 14
+    sprite_size = 192
     sprites = {}
     for kind in RULES:
         asset_sprite = load_agent_sprite_asset(kind, sprite_size)
@@ -153,7 +153,11 @@ def build_sprites():
 
 
 def build_team_preview_surfaces(_sprites):
-    return {group: make_team_preview_icon(group, 96) for group in TEAM_TYPES}
+    previews = {}
+    for group in TEAM_TYPES:
+        from_asset = load_agent_sprite_asset(group, 96)
+        previews[group] = from_asset if from_asset is not None else make_team_preview_icon(group, 96)
+    return previews
 
 
 def build_background_surface():
@@ -173,8 +177,8 @@ def build_background_surface():
     return surface
 
 
-def draw_pause_button(screen, font, paused):
-    rect = pygame.Rect(WIDTH - 162, 12, 146, 38)
+def draw_pause_button(screen, font, paused, top_y=12):
+    rect = pygame.Rect(WIDTH - 162, top_y, 146, 38)
     color = (61, 126, 219) if not paused else (52, 162, 106)
     pygame.draw.rect(screen, color, rect, border_radius=8)
     label = "PAUSE (P)" if not paused else "RESUME (P)"
@@ -240,6 +244,89 @@ def draw_soft_text_panel(screen, lines, center_x, top_y, pad_x=14, pad_y=10, lin
     return panel
 
 
+def format_elapsed_mmss(elapsed_seconds):
+    total = max(0, int(elapsed_seconds))
+    mins = total // 60
+    secs = total % 60
+    return f"{mins:02d}:{secs:02d}"
+
+
+def draw_match_timer_hud(screen, font, elapsed_seconds, top_y=12):
+    timer_text = f"TIME {format_elapsed_mmss(elapsed_seconds)}"
+    text = font.render(timer_text, True, (42, 52, 68))
+    panel = pygame.Rect(
+        WIDTH - 184 - text.get_width() - 18,
+        top_y,
+        text.get_width() + 18,
+        text.get_height() + 10,
+    )
+    panel_surf = pygame.Surface((panel.width, panel.height), pygame.SRCALPHA)
+    pygame.draw.rect(panel_surf, (252, 254, 255, 150), panel_surf.get_rect(), border_radius=8)
+    pygame.draw.rect(panel_surf, (188, 198, 215, 132), panel_surf.get_rect(), 1, border_radius=8)
+    screen.blit(panel_surf, (panel.x, panel.y))
+    screen.blit(text, (panel.x + 9, panel.y + 5))
+    return panel
+
+
+def _draw_keycap(screen, font, label, x, y, active=False):
+    w = max(30, 12 + len(label) * 11)
+    h = 28
+    rect = pygame.Rect(x, y, w, h)
+    fill = (78, 126, 214) if active else (239, 243, 250)
+    border = (57, 104, 191) if active else (137, 149, 173)
+    text_color = (255, 255, 255) if active else (71, 82, 106)
+    pygame.draw.rect(screen, fill, rect, border_radius=7)
+    pygame.draw.rect(screen, border, rect, 2, border_radius=7)
+    text = font.render(label, True, text_color)
+    screen.blit(text, (rect.centerx - text.get_width() // 2, rect.centery - text.get_height() // 2))
+    return rect
+
+
+def draw_hotkey_bar(screen, font, items, active_labels):
+    if not items:
+        return
+
+    measured = []
+    total_w = 26
+    for label, desc in items:
+        cap_w = max(30, 12 + len(label) * 11)
+        desc_w = font.size(desc)[0]
+        measured.append((label, desc, cap_w, desc_w))
+        total_w += cap_w + 8 + desc_w + 18
+
+    panel = pygame.Rect(WIDTH // 2 - total_w // 2, HEIGHT - 40, total_w, 36)
+    panel_surf = pygame.Surface((panel.width, panel.height), pygame.SRCALPHA)
+    pygame.draw.rect(panel_surf, (250, 253, 255, 155), panel_surf.get_rect(), border_radius=11)
+    pygame.draw.rect(panel_surf, (186, 196, 214, 145), panel_surf.get_rect(), 1, border_radius=11)
+    screen.blit(panel_surf, (panel.x, panel.y))
+
+    x = panel.x + 12
+    y = panel.y + 4
+    for label, desc, cap_w, _desc_w in measured:
+        cap_rect = _draw_keycap(screen, font, label, x, y, active=label in active_labels)
+        x = cap_rect.right + 8
+        desc_text = font.render(desc, True, (82, 93, 116))
+        screen.blit(desc_text, (x, panel.centery - desc_text.get_height() // 2))
+        x += desc_text.get_width() + 18
+
+
+def _wrap_single_line(font, text, max_width):
+    if font.size(text)[0] <= max_width:
+        return [text]
+
+    parts = []
+    remaining = text
+    while remaining:
+        chunk = remaining
+        while chunk and font.size(chunk)[0] > max_width:
+            chunk = chunk[:-1]
+        if not chunk:
+            break
+        parts.append(chunk)
+        remaining = remaining[len(chunk):]
+    return parts or [text]
+
+
 def draw_player_controlled_hud(screen, font, agents, y=12):
     controlled = sorted(a.slot_id for a in agents if a.slot_id is not None and a.is_mobile)
     ctrl_text = ", ".join(PLAYER_LABELS[p] for p in controlled) if controlled else "none"
@@ -277,19 +364,26 @@ def draw_network_hud(screen, font, connected_players, latency_ms, start_y=44):
         y = panel.bottom + 4
 
 
-def draw_menu_network_info(screen, font, connected_players, latency_ms):
-    panel = pygame.Rect(50, HEIGHT - 245, 390, 185)
+def draw_menu_network_info(screen, font, tiny_font, connected_players, latency_ms, pressed_buttons):
+    panel = pygame.Rect(50, HEIGHT - 304, 390, 244)
     pygame.draw.rect(screen, (255, 255, 255), panel, border_radius=14)
     pygame.draw.rect(screen, (210, 218, 232), panel, 1, border_radius=14)
-    screen.blit(font.render("Connection", True, (45, 52, 66)), (panel.x + 16, panel.y + 14))
+
+    if connected_players:
+        connected_text = "Connected: " + "  ".join(PLAYER_LABELS[p] for p in connected_players)
+    else:
+        connected_text = "Connected: none"
+    header = tiny_font.render(connected_text, True, (45, 52, 66))
+    screen.blit(header, (panel.x + 16, panel.y + 15))
 
     if not connected_players:
         msg = font.render("No mobile connected", True, (120, 128, 142))
         screen.blit(msg, (panel.x + 16, panel.y + 60))
-        return
+        return {}
 
+    release_buttons = {}
     y = panel.y + 52
-    for player_id in connected_players:
+    for player_id in sorted(connected_players):
         ms = latency_ms.get(player_id, 9999.0)
         ms = round(ms / 5.0) * 5.0
         if ms < 90:
@@ -308,7 +402,25 @@ def draw_menu_network_info(screen, font, connected_players, latency_ms):
         pygame.draw.circle(screen, dot, (panel.x + 22, y + 9), 6)
         line = f"{PLAYER_LABELS[player_id]}  {int(ms)}ms  {quality}"
         screen.blit(font.render(line, True, text_color), (panel.x + 36, y))
-        y += 24
+
+        release_rect = pygame.Rect(panel.right - 94, y - 1, 80, 22)
+        release_id = f"release_{player_id}"
+        pressed = release_id in pressed_buttons
+        draw_rect = release_rect.move(0, 2 if pressed else 0)
+        fill = (69, 117, 204) if pressed else (237, 242, 251)
+        border = (58, 98, 175) if pressed else (88, 120, 176)
+        label_color = (255, 255, 255) if pressed else (62, 92, 148)
+        pygame.draw.rect(screen, fill, draw_rect, border_radius=7)
+        pygame.draw.rect(screen, border, draw_rect, 2, border_radius=7)
+        release_text = tiny_font.render("Release", True, label_color)
+        screen.blit(
+            release_text,
+            (draw_rect.centerx - release_text.get_width() // 2, draw_rect.centery - release_text.get_height() // 2),
+        )
+        release_buttons[player_id] = draw_rect
+        y += 30
+
+    return release_buttons
 
 
 def update_and_draw_trails(screen, trail_surface, agents):
@@ -395,11 +507,14 @@ def draw_menu(
     tiny_font,
     button_font,
     team_qr_surfaces,
+    team_join_urls,
     team_preview_surfaces,
     connected_players,
     latency_ms,
     selected_difficulty,
+    pressed_buttons,
 ):
+    pressed_buttons = pressed_buttons or set()
     screen.blit(bg_surface, (0, 0))
 
     title = title_font.render("RPS BATTLE LOBBY", True, (31, 36, 46))
@@ -426,9 +541,27 @@ def draw_menu(
 
         qr_surface = team_qr_surfaces.get(group)
         if qr_surface is not None:
+            preview_panel = pygame.Rect(box.right - 126, qr_box_y + 62, 104, 186)
+            full_url = str(team_join_urls.get(group, f"/join?group={group}"))
+            url_x = box_x + 18
+            url_w = max(80, preview_panel.x - url_x - 12)
+            if "/join?" in full_url:
+                prefix, suffix = full_url.split("/join?", 1)
+                source_lines = [prefix, "/join?" + suffix]
+            else:
+                source_lines = [full_url]
+
+            wrapped_lines = []
+            for line in source_lines:
+                wrapped_lines.extend(_wrap_single_line(tiny_font, line, url_w))
+
+            line_height = tiny_font.get_height()
+            total_height = len(wrapped_lines) * line_height + max(0, len(wrapped_lines) - 1) * 2
+            url_y = box.bottom - 14 - total_height
+
             qr_x = box_x + 23
             qr_y = qr_box_y + 65
-            max_qr_bottom = box.bottom - 36
+            max_qr_bottom = url_y - 8
             if qr_y + qr_surface.get_height() > max_qr_bottom:
                 qr_y = max(qr_box_y + 52, max_qr_bottom - qr_surface.get_height())
 
@@ -436,7 +569,6 @@ def draw_menu(
             pygame.draw.rect(screen, (249, 251, 255), qr_bg, border_radius=10)
             screen.blit(qr_surface, (qr_x, qr_y))
 
-            preview_panel = pygame.Rect(box.right - 126, qr_box_y + 62, 104, 186)
             pygame.draw.rect(screen, (247, 250, 255), preview_panel, border_radius=10)
             pygame.draw.rect(screen, (220, 227, 239), preview_panel, 1, border_radius=10)
             preview_surface = team_preview_surfaces.get(group)
@@ -449,23 +581,25 @@ def draw_menu(
                 look_text,
                 (preview_panel.centerx - look_text.get_width() // 2, preview_panel.bottom - 22),
             )
-            short_url = f"/join?group={group}"
-            url_text = tiny_font.render(short_url, True, (63, 78, 112))
-            screen.blit(url_text, (box_x + 18, box.bottom - 30))
+            for idx, line in enumerate(wrapped_lines):
+                line_surface = tiny_font.render(line, True, (63, 78, 112))
+                screen.blit(line_surface, (url_x, url_y + idx * (line_height + 2)))
         else:
             screen.blit(tiny_font.render(QR_MISSING_MSG, True, (140, 50, 50)), (box_x + 16, qr_box_y + 74))
             install = "Or: pip3 install -r requirements.txt"
             screen.blit(tiny_font.render(install, True, (140, 50, 50)), (box_x + 16, qr_box_y + 102))
 
-    if connected_players:
-        connected_text = "Connected: " + "  ".join(PLAYER_LABELS[p] for p in connected_players)
-    else:
-        connected_text = "Connected: none"
-    screen.blit(font.render(connected_text, True, (40, 46, 58)), (50, HEIGHT - 300))
-    draw_menu_network_info(screen, small_font, connected_players, latency_ms)
+    release_buttons = draw_menu_network_info(
+        screen,
+        small_font,
+        tiny_font,
+        connected_players,
+        latency_ms,
+        pressed_buttons,
+    )
     draw_player_legend(screen, tiny_font, small_font, connected_players)
 
-    test_button = pygame.Rect(WIDTH // 2 - 180, HEIGHT - 180, 360, 56)
+    test_button = pygame.Rect(WIDTH // 2 - 180, HEIGHT - 214, 360, 56)
     diff_btn_y = test_button.y - 40
     diff_label = tiny_font.render("Difficulty", True, (79, 89, 106))
     screen.blit(diff_label, (test_button.centerx - diff_label.get_width() // 2, diff_btn_y - 22))
@@ -475,36 +609,46 @@ def draw_menu(
     easy_active = selected_difficulty == "easy"
     hard_active = selected_difficulty == "hard"
 
-    pygame.draw.rect(screen, (214, 241, 224) if easy_active else (244, 247, 252), easy_btn, border_radius=8)
-    pygame.draw.rect(screen, (63, 145, 96) if easy_active else (142, 153, 176), easy_btn, 2, border_radius=8)
-    easy_text = tiny_font.render("EASY", True, (45, 120, 74) if easy_active else (82, 93, 112))
-    screen.blit(easy_text, (easy_btn.centerx - easy_text.get_width() // 2, easy_btn.centery - easy_text.get_height() // 2))
+    easy_pressed = "menu_easy" in pressed_buttons
+    hard_pressed = "menu_hard" in pressed_buttons
+    test_pressed = "menu_test" in pressed_buttons
+    rules_pressed = "menu_rules" in pressed_buttons
+    start_pressed = "menu_start" in pressed_buttons
 
-    pygame.draw.rect(screen, (227, 235, 255) if hard_active else (244, 247, 252), hard_btn, border_radius=8)
-    pygame.draw.rect(screen, (70, 108, 194) if hard_active else (142, 153, 176), hard_btn, 2, border_radius=8)
-    hard_text = tiny_font.render("HARD", True, (50, 83, 164) if hard_active else (82, 93, 112))
-    screen.blit(hard_text, (hard_btn.centerx - hard_text.get_width() // 2, hard_btn.centery - hard_text.get_height() // 2))
-
-    pygame.draw.rect(screen, (237, 242, 251), test_button, border_radius=12)
-    pygame.draw.rect(screen, (88, 120, 176), test_button, 2, border_radius=12)
-    test_text = button_font.render("TEST CONTROLS", True, (62, 92, 148))
-    screen.blit(test_text, (test_button.centerx - test_text.get_width() // 2, test_button.centery - test_text.get_height() // 2))
-
+    easy_draw = easy_btn.move(0, 2 if easy_pressed else 0)
+    hard_draw = hard_btn.move(0, 2 if hard_pressed else 0)
+    test_draw = test_button.move(0, 2 if test_pressed else 0)
     rules_button = pygame.Rect(WIDTH - 210, 78, 160, 44)
-    pygame.draw.rect(screen, (246, 248, 252), rules_button, border_radius=10)
-    pygame.draw.rect(screen, (120, 136, 166), rules_button, 2, border_radius=10)
-    rules_text = tiny_font.render("RULES", True, (77, 90, 116))
-    screen.blit(rules_text, (rules_button.centerx - rules_text.get_width() // 2, rules_button.centery - rules_text.get_height() // 2))
+    rules_draw = rules_button.move(0, 2 if rules_pressed else 0)
+    button = pygame.Rect(WIDTH // 2 - 180, HEIGHT - 146, 360, 68)
+    start_draw = button.move(0, 2 if start_pressed else 0)
 
-    button = pygame.Rect(WIDTH // 2 - 180, HEIGHT - 112, 360, 68)
-    pygame.draw.rect(screen, (38, 178, 96), button, border_radius=12)
+    pygame.draw.rect(screen, (198, 228, 210) if (easy_active or easy_pressed) else (244, 247, 252), easy_draw, border_radius=8)
+    pygame.draw.rect(screen, (53, 126, 83) if (easy_active or easy_pressed) else (142, 153, 176), easy_draw, 2, border_radius=8)
+    easy_text = tiny_font.render("EASY", True, (255, 255, 255) if easy_pressed else ((45, 120, 74) if easy_active else (82, 93, 112)))
+    screen.blit(easy_text, (easy_draw.centerx - easy_text.get_width() // 2, easy_draw.centery - easy_text.get_height() // 2))
+
+    pygame.draw.rect(screen, (214, 225, 250) if (hard_active or hard_pressed) else (244, 247, 252), hard_draw, border_radius=8)
+    pygame.draw.rect(screen, (62, 96, 170) if (hard_active or hard_pressed) else (142, 153, 176), hard_draw, 2, border_radius=8)
+    hard_text = tiny_font.render("HARD", True, (255, 255, 255) if hard_pressed else ((50, 83, 164) if hard_active else (82, 93, 112)))
+    screen.blit(hard_text, (hard_draw.centerx - hard_text.get_width() // 2, hard_draw.centery - hard_text.get_height() // 2))
+
+    pygame.draw.rect(screen, (88, 120, 176) if test_pressed else (237, 242, 251), test_draw, border_radius=12)
+    pygame.draw.rect(screen, (71, 101, 156), test_draw, 2, border_radius=12)
+    test_text = button_font.render("TEST CONTROLS", True, (255, 255, 255) if test_pressed else (62, 92, 148))
+    screen.blit(test_text, (test_draw.centerx - test_text.get_width() // 2, test_draw.centery - test_text.get_height() // 2))
+
+    pygame.draw.rect(screen, (120, 136, 166) if rules_pressed else (246, 248, 252), rules_draw, border_radius=10)
+    pygame.draw.rect(screen, (92, 108, 138), rules_draw, 2, border_radius=10)
+    rules_text = tiny_font.render("RULES", True, (255, 255, 255) if rules_pressed else (77, 90, 116))
+    screen.blit(rules_text, (rules_draw.centerx - rules_text.get_width() // 2, rules_draw.centery - rules_text.get_height() // 2))
+
+    pygame.draw.rect(screen, (27, 158, 83) if start_pressed else (38, 178, 96), start_draw, border_radius=12)
     button_text = f"START ({len(connected_players)}/6 connected)"
-    label = button_font.render(button_text, True, (255, 255, 255))
-    screen.blit(label, (button.centerx - label.get_width() // 2, button.centery - label.get_height() // 2))
+    label = button_font.render(button_text, True, (236, 255, 241) if start_pressed else (255, 255, 255))
+    screen.blit(label, (start_draw.centerx - label.get_width() // 2, start_draw.centery - label.get_height() // 2))
 
-    hint = "Missing players will be AI-controlled."
-    screen.blit(tiny_font.render(hint, True, (98, 104, 118)), (WIDTH // 2 - 98, HEIGHT - 26))
     fs_hint = tiny_font.render("F: Toggle Fullscreen", True, (98, 104, 118))
-    screen.blit(fs_hint, (WIDTH - fs_hint.get_width() - 22, HEIGHT - 24))
+    screen.blit(fs_hint, (WIDTH - fs_hint.get_width() - 22, HEIGHT - fs_hint.get_height() - 6))
 
-    return button, test_button, rules_button, easy_btn, hard_btn
+    return start_draw, test_draw, rules_draw, easy_draw, hard_draw, release_buttons

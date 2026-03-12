@@ -1,10 +1,12 @@
 import math
 import random
+import time
 
 import pygame
 
 from game_settings import (
     AGENT_RADIUS,
+    CONVERSION_GRACE_SECONDS,
     DETECTION_RADIUS,
     MAX_FORCE,
     MAX_PLAYERS,
@@ -39,6 +41,8 @@ class Agent:
         self.vel = pygame.Vector2(random.uniform(-1, 1), random.uniform(-1, 1)).normalize() * SPEED
         self.acc = pygame.Vector2(0, 0)
         self.heading_deg = math.degrees(math.atan2(-self.vel.y, self.vel.x))
+        self.convert_lock_until = 0.0
+        self.speed_scale = 1.0
 
     @property
     def is_mobile(self):
@@ -51,7 +55,8 @@ class Agent:
     def _move_mobile(self, input_vec):
         if input_vec.length() > 1:
             input_vec = input_vec.normalize()
-        self.vel = input_vec * (SPEED * PLAYER_SPEED_MULT) if input_vec.length() > 0.03 else self.vel * 0.85
+        base_speed = SPEED * self.speed_scale
+        self.vel = input_vec * (base_speed * PLAYER_SPEED_MULT) if input_vec.length() > 0.03 else self.vel * 0.85
         self.pos += self.vel
         self._limit_inside()
 
@@ -106,15 +111,17 @@ class Agent:
         goal = desired + separation * 3 + boundary * 2 + wander
 
         if goal.length() > 0:
-            target_vel = goal.normalize() * SPEED
+            target_speed = SPEED * self.speed_scale
+            target_vel = goal.normalize() * target_speed
             steer = target_vel - self.vel
             if steer.length() > MAX_FORCE:
                 steer.scale_to_length(MAX_FORCE)
             self.acc += steer
 
         self.vel += self.acc
-        if self.vel.length() > SPEED:
-            self.vel.scale_to_length(SPEED)
+        speed_cap = SPEED * self.speed_scale
+        if self.vel.length() > speed_cap:
+            self.vel.scale_to_length(speed_cap)
 
         self.pos += self.vel
         self.acc *= 0
@@ -148,7 +155,7 @@ class Agent:
         if input_vec.length() > 1:
             input_vec = input_vec.normalize()
 
-        prep_speed = SPEED * PLAYER_SPEED_MULT * POSITIONING_SPEED_MULT
+        prep_speed = SPEED * self.speed_scale * PLAYER_SPEED_MULT * POSITIONING_SPEED_MULT
         if input_vec.length() > 0.03:
             self.vel = input_vec * prep_speed
         else:
@@ -164,6 +171,7 @@ class Agent:
         self._limit_inside()
 
     def collide_and_convert(self, all_agents):
+        now = time.monotonic()
         for other in all_agents:
             if other is self:
                 continue
@@ -187,8 +195,12 @@ class Agent:
                 self.pos += n * (overlap * self_share)
                 other.pos -= n * (overlap * other_share)
 
+            if now < self.convert_lock_until or now < other.convert_lock_until:
+                continue
             if other.kind == PREDATOR_RULES[self.kind]:
                 self.kind = PREDATOR_RULES[self.kind]
+                self.convert_lock_until = now + CONVERSION_GRACE_SECONDS
+                break
 
     def draw(self, screen, sprites):
         if self.slot_id is not None and self.is_mobile:
@@ -205,7 +217,9 @@ class Agent:
             self.heading_deg = math.degrees(math.atan2(-self.vel.y, self.vel.x))
 
         base = sprites[self.kind]
-        rotated = pygame.transform.rotate(base, self.heading_deg - SPRITE_FORWARD_DEG[self.kind])
+        target_px = AGENT_RADIUS * 2 + 14
+        scale = target_px / max(1, base.get_width())
+        rotated = pygame.transform.rotozoom(base, self.heading_deg - SPRITE_FORWARD_DEG[self.kind], scale)
         rect = rotated.get_rect(center=(int(self.pos.x), int(self.pos.y)))
         screen.blit(rotated, rect)
 

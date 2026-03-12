@@ -151,6 +151,14 @@ class MobileHub:
             self.last_seen[token] = time.monotonic()
             return True
 
+    def release_player(self, player_id):
+        with self.lock:
+            token = self.player_to_token.get(player_id)
+            if token is None:
+                return False
+            self._disconnect_player(player_id, token)
+            return True
+
     def snapshot(self):
         with self.lock:
             self._cleanup_stale()
