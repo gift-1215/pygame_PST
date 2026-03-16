@@ -15,6 +15,7 @@ from game_settings import (
     SERVER_HOST,
     SERVER_PORT,
     SPEED_RAMP_START_SECONDS,
+    SPEED_RAMP_END_SECONDS,
     SPEED_RAMP_STEP_MULT,
     SPEED_RAMP_STEP_SECONDS,
     START_FULLSCREEN,
@@ -256,7 +257,8 @@ def main():
     def speed_scale_for_elapsed(elapsed_seconds):
         if elapsed_seconds < SPEED_RAMP_START_SECONDS:
             return 1.0
-        steps = int((elapsed_seconds - SPEED_RAMP_START_SECONDS) // SPEED_RAMP_STEP_SECONDS) + 1
+        effective_elapsed = min(elapsed_seconds, SPEED_RAMP_END_SECONDS)
+        steps = int((effective_elapsed - SPEED_RAMP_START_SECONDS) // SPEED_RAMP_STEP_SECONDS) + 1
         return 1.0 + steps * SPEED_RAMP_STEP_MULT
 
     def spawn_confetti_once(winner_color):

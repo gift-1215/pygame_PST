@@ -25,7 +25,7 @@ def draw_rules_page(screen, bg_surface, title_font, font, small_font, button_fon
         "5. In match setup, NPCs pause so players can find their character.",
         "6. Press S to begin 3-second countdown and start the battle.",
         "7. Match timer appears at top-right during battle.",
-        "8. After 30s, base speed ramps up every 5s.",
+        "8. After 30s, base speed ramps up every 5s until 60s.",
         "9. Match ends when all agents become the same type.",
     ]
 
