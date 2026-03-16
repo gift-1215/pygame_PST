@@ -1,4 +1,5 @@
 import json
+import ipaddress
 import secrets
 import socket
 import threading
@@ -30,6 +31,40 @@ def get_local_ip():
         sock.close()
 
 
+def _is_private_ipv4(ip):
+    try:
+        parsed = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return parsed.version == 4 and parsed.is_private and not parsed.is_loopback
+
+
+def list_lan_ips():
+    candidates = []
+
+    def add(ip):
+        if ip and _is_private_ipv4(ip) and ip not in candidates:
+            candidates.append(ip)
+
+    add(get_local_ip())
+
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, family=socket.AF_INET, type=socket.SOCK_DGRAM):
+            add(info[4][0])
+    except OSError:
+        pass
+
+    try:
+        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+            add(ip)
+    except OSError:
+        pass
+
+    if not candidates:
+        candidates.append("127.0.0.1")
+    return candidates
+
+
 def load_controller_html():
     html_file = Path(__file__).with_name("controller.html")
     if html_file.exists():
@@ -43,6 +78,8 @@ class MobileHub:
         self.lock = threading.Lock()
         self.player_to_token = {}
         self.token_to_player = {}
+        self.token_to_device = {}
+        self.device_to_player = {}
         self.inputs = {pid: (0.0, 0.0) for pid in range(1, max_players + 1)}
         self.last_seen = {}
         self.last_rtt_ms = {pid: None for pid in range(1, max_players + 1)}
@@ -71,18 +108,32 @@ class MobileHub:
     def _disconnect_player(self, player_id, token):
         self.player_to_token.pop(player_id, None)
         self.token_to_player.pop(token, None)
+        self.token_to_device.pop(token, None)
         self.last_seen.pop(token, None)
         self.inputs[player_id] = (0.0, 0.0)
         self.last_rtt_ms[player_id] = None
 
-    def join(self, existing_token=None, requested_group=None):
+    def _assign_player_token(self, player_id, token, now, device_id=None):
+        self.player_to_token[player_id] = token
+        self.token_to_player[token] = player_id
+        self.last_seen[token] = now
+        self.inputs[player_id] = (0.0, 0.0)
+        self.last_rtt_ms[player_id] = None
+        if device_id:
+            self.token_to_device[token] = device_id
+            self.device_to_player[device_id] = player_id
+
+    def join(self, existing_token=None, requested_group=None, device_id=None):
         with self.lock:
             self._cleanup_stale()
+            now = time.monotonic()
 
             if existing_token and existing_token in self.token_to_player:
                 player_id = self.token_to_player[existing_token]
-                now = time.monotonic()
                 current_group = PLAYER_ASSIGNMENTS[player_id]["group"]
+                if device_id:
+                    self.token_to_device[existing_token] = device_id
+                    self.device_to_player[device_id] = player_id
 
                 if requested_group in TEAM_TYPES and requested_group != current_group:
                     target_player_id = self._first_free_slot(requested_group)
@@ -90,17 +141,31 @@ class MobileHub:
                         return False, None, None, "group_full"
 
                     self.player_to_token.pop(player_id, None)
-                    self.player_to_token[target_player_id] = existing_token
-                    self.token_to_player[existing_token] = target_player_id
                     self.inputs[player_id] = (0.0, 0.0)
                     self.last_rtt_ms[player_id] = None
-                    self.inputs[target_player_id] = (0.0, 0.0)
-                    self.last_rtt_ms[target_player_id] = None
-                    self.last_seen[existing_token] = now
+                    self._assign_player_token(target_player_id, existing_token, now, device_id=device_id)
                     return True, target_player_id, existing_token, "switched_group"
 
                 self.last_seen[existing_token] = now
                 return True, player_id, existing_token, "reconnected"
+
+            # If token is gone but same phone comes back, try reclaiming the remembered slot.
+            if device_id and device_id in self.device_to_player:
+                remembered_player = self.device_to_player[device_id]
+                remembered_group = PLAYER_ASSIGNMENTS[remembered_player]["group"]
+                if requested_group not in TEAM_TYPES or requested_group == remembered_group:
+                    current_token = self.player_to_token.get(remembered_player)
+                    if current_token is None:
+                        token = secrets.token_urlsafe(12)
+                        self._assign_player_token(remembered_player, token, now, device_id=device_id)
+                        return True, remembered_player, token, "rejoined_device"
+
+                    current_device = self.token_to_device.get(current_token)
+                    if current_device == device_id:
+                        self._disconnect_player(remembered_player, current_token)
+                        token = secrets.token_urlsafe(12)
+                        self._assign_player_token(remembered_player, token, now, device_id=device_id)
+                        return True, remembered_player, token, "rejoined_device"
 
             candidate_groups = []
             if requested_group in TEAM_TYPES:
@@ -113,10 +178,7 @@ class MobileHub:
                 if player_id is None:
                     continue
                 token = secrets.token_urlsafe(12)
-                self.player_to_token[player_id] = token
-                self.token_to_player[token] = player_id
-                self.last_seen[token] = time.monotonic()
-                self.inputs[player_id] = (0.0, 0.0)
+                self._assign_player_token(player_id, token, now, device_id=device_id)
                 return True, player_id, token, "joined"
 
             if requested_group in TEAM_TYPES:
@@ -233,7 +295,11 @@ class ControllerHandler(BaseHTTPRequestHandler):
 
         if path == "/api/join":
             requested_group = payload.get("group")
-            ok, player_id, token, reason = self.hub.join(payload.get("token"), requested_group=requested_group)
+            ok, player_id, token, reason = self.hub.join(
+                payload.get("token"),
+                requested_group=requested_group,
+                device_id=payload.get("device_id"),
+            )
             assigned_type = PLAYER_ASSIGNMENTS[player_id]["type"] if ok and player_id in PLAYER_ASSIGNMENTS else None
             assigned_group = PLAYER_ASSIGNMENTS[player_id]["group"] if ok and player_id in PLAYER_ASSIGNMENTS else None
             assigned_label = PLAYER_ASSIGNMENTS[player_id]["label"] if ok and player_id in PLAYER_ASSIGNMENTS else None

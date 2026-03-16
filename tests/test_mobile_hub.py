@@ -98,6 +98,33 @@ class MobileHubTest(unittest.TestCase):
         self.assertTrue(ok2)
         self.assertEqual(new_player_id, player_id)
 
+    def test_same_device_reclaims_previous_slot_after_disconnect(self):
+        ok, player_id, token, _reason = self.hub.join(requested_group="scissors", device_id="dev-a")
+        self.assertTrue(ok)
+
+        self.hub._disconnect_player(player_id, token)
+        ok2, player_id2, token2, reason2 = self.hub.join(requested_group="scissors", device_id="dev-a")
+
+        self.assertTrue(ok2)
+        self.assertEqual(reason2, "rejoined_device")
+        self.assertEqual(player_id2, player_id)
+        self.assertNotEqual(token2, token)
+
+    def test_same_device_can_rotate_stale_token_without_waiting(self):
+        ok, player_id, old_token, _reason = self.hub.join(requested_group="rock", device_id="dev-b")
+        self.assertTrue(ok)
+
+        ok2, player_id2, new_token, reason2 = self.hub.join(
+            existing_token="invalid-token",
+            requested_group="rock",
+            device_id="dev-b",
+        )
+        self.assertTrue(ok2)
+        self.assertEqual(reason2, "rejoined_device")
+        self.assertEqual(player_id2, player_id)
+        self.assertNotEqual(new_token, old_token)
+        self.assertNotIn(old_token, self.hub.token_to_player)
+
 
 if __name__ == "__main__":
     unittest.main()

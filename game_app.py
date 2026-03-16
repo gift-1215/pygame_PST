@@ -24,7 +24,7 @@ from game_settings import (
     WIDTH,
     HEIGHT,
 )
-from networking import MobileHub, get_local_ip, load_controller_html, start_server
+from networking import MobileHub, list_lan_ips, load_controller_html, start_server
 from rules_page import draw_rules_page
 from visuals import (
     build_background_surface,
@@ -80,16 +80,36 @@ def main():
         pygame.quit()
         return
 
-    local_ip = get_local_ip()
-    base_join_url = f"http://{local_ip}:{SERVER_PORT}/join"
-    team_join_urls = {
-        group: f"{base_join_url}?group={group}" for group in TEAM_TYPES
-    }
-    team_qr_surfaces = {
-        group: build_qr_surface(url) for group, url in team_join_urls.items()
-    }
-    if any(surface is None for surface in team_qr_surfaces.values()):
-        print(QR_MISSING_MSG)
+    lan_ips = list_lan_ips()
+    selected_lan_ip_idx = 0
+    team_join_urls = {}
+    team_qr_surfaces = {}
+
+    def rebuild_team_qr_for_ip():
+        nonlocal team_join_urls, team_qr_surfaces
+        active_ip = lan_ips[selected_lan_ip_idx]
+        base_join_url = f"http://{active_ip}:{SERVER_PORT}/join"
+        team_join_urls = {group: f"{base_join_url}?group={group}" for group in TEAM_TYPES}
+        team_qr_surfaces = {group: build_qr_surface(url) for group, url in team_join_urls.items()}
+        if any(surface is None for surface in team_qr_surfaces.values()):
+            print(QR_MISSING_MSG)
+
+    def refresh_lan_ip_choices(preferred_ip=None):
+        nonlocal lan_ips, selected_lan_ip_idx
+        refreshed = list_lan_ips()
+        if not refreshed:
+            refreshed = ["127.0.0.1"]
+        keep_ip = preferred_ip
+        if keep_ip is None and lan_ips:
+            keep_ip = lan_ips[selected_lan_ip_idx]
+        lan_ips = refreshed
+        if keep_ip in lan_ips:
+            selected_lan_ip_idx = lan_ips.index(keep_ip)
+        else:
+            selected_lan_ip_idx = 0
+        rebuild_team_qr_for_ip()
+
+    refresh_lan_ip_choices()
 
     sprites = build_sprites()
     team_preview_surfaces = build_team_preview_surfaces(sprites)
@@ -389,7 +409,15 @@ def main():
                         go_to("menu", now)
 
             elif state == "menu":
-                start_btn, test_btn, rules_btn, easy_btn, hard_btn, release_buttons = draw_menu(
+                (
+                    start_btn,
+                    test_btn,
+                    rules_btn,
+                    easy_btn,
+                    hard_btn,
+                    release_buttons,
+                    ip_refresh_btn,
+                ) = draw_menu(
                     screen,
                     bg_surface,
                     title_font,
@@ -421,7 +449,10 @@ def main():
                         if released_any:
                             continue
 
-                    if event.type == pygame.MOUSEBUTTONDOWN and start_btn.collidepoint(mouse_pos):
+                    if event.type == pygame.MOUSEBUTTONDOWN and ip_refresh_btn.collidepoint(mouse_pos):
+                        mark_button("menu_ip_refresh", now)
+                        refresh_lan_ip_choices(preferred_ip=lan_ips[selected_lan_ip_idx])
+                    elif event.type == pygame.MOUSEBUTTONDOWN and start_btn.collidepoint(mouse_pos):
                         mark_button("menu_start", now)
                         schedule_action("start_positioning", now)
                     elif event.type == pygame.MOUSEBUTTONDOWN and test_btn.collidepoint(mouse_pos):

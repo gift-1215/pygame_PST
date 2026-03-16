@@ -101,6 +101,7 @@
 
     let token = localStorage.getItem('rps_mobile_token') || '';
     const requestedGroup = (new URLSearchParams(window.location.search).get('group') || '').toLowerCase();
+    let deviceId = localStorage.getItem('rps_mobile_device_id') || '';
     let vec = { x: 0, y: 0 };
     let activeTouch = null;
     let sending = false;
@@ -128,13 +129,25 @@
       lastRttMs = null;
     }
 
+    function ensureDeviceId() {
+      if (deviceId) return;
+      if (window.crypto && crypto.randomUUID) {
+        deviceId = crypto.randomUUID();
+      } else {
+        deviceId = `dev-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+      }
+      localStorage.setItem('rps_mobile_device_id', deviceId);
+    }
+
     async function joinRoom() {
       if (joining) return;
       joining = true;
       try {
         const payload = {};
+        ensureDeviceId();
         if (token) payload.token = token;
         if (requestedGroup) payload.group = requestedGroup;
+        payload.device_id = deviceId;
         const data = await apiPost('/api/join', payload);
         if (!data.ok) {
           if (data.reason === 'group_full') {
@@ -212,6 +225,7 @@
       const t0 = performance.now();
       try {
         const payload = { token, x: vec.x, y: vec.y };
+        if (deviceId) payload.device_id = deviceId;
         if (lastRttMs !== null) payload.rtt_ms = lastRttMs;
         const data = await apiPost('/api/input', payload);
         if (!data.ok && data.error === 'invalid_token') {

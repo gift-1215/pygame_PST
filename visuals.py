@@ -614,6 +614,7 @@ def draw_menu(
     test_pressed = "menu_test" in pressed_buttons
     rules_pressed = "menu_rules" in pressed_buttons
     start_pressed = "menu_start" in pressed_buttons
+    ip_refresh_pressed = "menu_ip_refresh" in pressed_buttons
 
     easy_draw = easy_btn.move(0, 2 if easy_pressed else 0)
     hard_draw = hard_btn.move(0, 2 if hard_pressed else 0)
@@ -622,6 +623,17 @@ def draw_menu(
     rules_draw = rules_button.move(0, 2 if rules_pressed else 0)
     button = pygame.Rect(WIDTH // 2 - 180, HEIGHT - 146, 360, 68)
     start_draw = button.move(0, 2 if start_pressed else 0)
+
+    ip_refresh_btn = pygame.Rect(WIDTH // 2 - 140, HEIGHT - 308, 280, 30)
+    ip_refresh_draw = ip_refresh_btn.move(0, 2 if ip_refresh_pressed else 0)
+
+    pygame.draw.rect(screen, (88, 120, 176) if ip_refresh_pressed else (237, 242, 251), ip_refresh_draw, border_radius=8)
+    pygame.draw.rect(screen, (71, 101, 156), ip_refresh_draw, 2, border_radius=8)
+    refresh_text = tiny_font.render("REFRESH QR", True, (255, 255, 255) if ip_refresh_pressed else (62, 92, 148))
+    screen.blit(
+        refresh_text,
+        (ip_refresh_draw.centerx - refresh_text.get_width() // 2, ip_refresh_draw.centery - refresh_text.get_height() // 2),
+    )
 
     pygame.draw.rect(screen, (198, 228, 210) if (easy_active or easy_pressed) else (244, 247, 252), easy_draw, border_radius=8)
     pygame.draw.rect(screen, (53, 126, 83) if (easy_active or easy_pressed) else (142, 153, 176), easy_draw, 2, border_radius=8)
@@ -651,4 +663,12 @@ def draw_menu(
     fs_hint = tiny_font.render("F: Toggle Fullscreen", True, (98, 104, 118))
     screen.blit(fs_hint, (WIDTH - fs_hint.get_width() - 22, HEIGHT - fs_hint.get_height() - 6))
 
-    return start_draw, test_draw, rules_draw, easy_draw, hard_draw, release_buttons
+    return (
+        start_draw,
+        test_draw,
+        rules_draw,
+        easy_draw,
+        hard_draw,
+        release_buttons,
+        ip_refresh_draw,
+    )
